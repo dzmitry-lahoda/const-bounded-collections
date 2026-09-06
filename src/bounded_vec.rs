@@ -2,6 +2,7 @@ use crate::witnesses;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::convert::TryFrom;
+use core::num::NonZero;
 use core::slice::{Iter, IterMut};
 use thiserror::Error;
 
@@ -183,6 +184,10 @@ impl<T, const U: usize> BoundedVec<T, 0, U, witnesses::Empty<U>> {
     /// Transfers all elements and capacity into a `Vec`, leaving this vector empty.
     ///
     /// Does not clone or drop elements. Only available for empty-capable vectors.
+    #[expect(
+        clippy::mem_replace_with_default,
+        reason = "mem::take is not const-stable"
+    )]
     pub const fn take_vec(&mut self) -> Vec<T> {
         core::mem::replace(&mut self.inner, Vec::new())
     }
@@ -405,18 +410,11 @@ impl<T, const L: usize, const U: usize, W> BoundedVec<T, L, U, W> {
     /// let data: BoundedVec<_, 2, 8> = vec![1u8, 2].try_into().unwrap();
     /// assert_eq!(data.to_vec(), vec![1u8,2]);
     /// ```
-    pub const fn to_vec(self) -> Vec<T>
-    where
-        W: Copy,
-    {
-        self.into_vec()
-    }
-
-    /// Consumes the bounded vector, transferring its elements and allocation.
-    ///
-    /// Like [`Self::to_vec`], this does not clone or drop elements. All built-in
-    /// witnesses are `Copy`, allowing the emptied wrapper to be forgotten in const.
-    pub const fn into_vec(mut self) -> Vec<T>
+    #[expect(
+        clippy::mem_replace_with_default,
+        reason = "mem::take is not const-stable"
+    )]
+    pub const fn to_vec(mut self) -> Vec<T>
     where
         W: Copy,
     {
@@ -1088,6 +1086,25 @@ impl<T, const L: usize, const U: usize> BoundedVec<T, L, U, witnesses::NonEmpty<
         Ok(self.inner.pop().unwrap())
     }
 
+    /// Removes the last element from the vector and returns it.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the vector length is already at lower bound `L`.
+    #[track_caller]
+    #[cfg(feature = "panic")]
+    pub fn pop(&mut self) -> T {
+        let len = self.inner.len();
+        if len <= L {
+            panic!("Cannot pop item from BoundedVec: length {len} is already at lower bound {L}");
+        }
+        #[expect(
+            clippy::expect_used,
+            reason = "the lower-bound check guarantees an element"
+        )]
+        self.inner.pop().expect("we know there are elements")
+    }
+
     /// Removes the element at position `index`, returning it, or returns
     /// `LowerBoundError` if removing an element would violate lower bound `L`.
     ///
@@ -1108,8 +1125,31 @@ impl<T, const L: usize, const U: usize> BoundedVec<T, L, U, witnesses::NonEmpty<
         Ok(self.inner.remove(index))
     }
 
+    /// Removes and returns the element at position `index` within the vector,
+    /// shifting all elements after it to the left.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index >= len`.
+    /// Panics if the vector length is already at lower bound `L`.
+    #[track_caller]
+    #[cfg(feature = "panic")]
+    pub fn remove(&mut self, index: usize) -> T {
+        let len = self.inner.len();
+        if len <= L {
+            panic!(
+                "Cannot remove item from BoundedVec: length {len} is already at lower bound {L}"
+            );
+        }
+        if index >= len {
+            panic!("removal index (is {index}) should be < len (is {len})");
+        }
+        self.inner.remove(index)
+    }
+
     /// Shortens the vector to `len`, or returns `LowerBoundError` if `len < L`.
-    pub fn try_truncate(&mut self, len: usize) -> Result<(), BoundedVecOutOfBounds> {
+    pub fn try_truncate(&mut self, len: NonZero<usize>) -> Result<(), BoundedVecOutOfBounds> {
+        let len = len.get();
         if len < L {
             return Err(BoundedVecOutOfBounds::LowerBoundError {
                 lower_bound: L,
@@ -1118,6 +1158,21 @@ impl<T, const L: usize, const U: usize> BoundedVec<T, L, U, witnesses::NonEmpty<
         }
         self.inner.truncate(len);
         Ok(())
+    }
+
+    /// Shortens the vector, keeping the first `len` elements and dropping the rest.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `len < L`.
+    #[track_caller]
+    #[cfg(feature = "panic")]
+    pub fn truncate(&mut self, len: NonZero<usize>) {
+        let len = len.get();
+        if len < L {
+            panic!("Cannot truncate BoundedVec to length {len}: below lower bound {L}");
+        }
+        self.inner.truncate(len);
     }
 
     /// Retains elements matching the predicate, or returns `LowerBoundError`
@@ -1144,6 +1199,22 @@ impl<T, const L: usize, const U: usize> BoundedVec<T, L, U, witnesses::NonEmpty<
             decisions.next().expect("one decision per element")
         });
         Ok(())
+    }
+
+    /// Retains only the elements specified by the predicate.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the number of retained elements would be less than lower bound `L`.
+    #[track_caller]
+    #[cfg(feature = "panic")]
+    pub fn retain<F>(&mut self, f: F)
+    where
+        F: FnMut(&T) -> bool,
+    {
+        if let Err(err) = self.try_retain(f) {
+            panic!("Cannot retain elements in BoundedVec: {err}");
+        }
     }
 
     /// Removes consecutive duplicate elements in the vector, or returns

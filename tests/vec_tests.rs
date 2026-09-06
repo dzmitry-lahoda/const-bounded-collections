@@ -321,6 +321,84 @@ fn non_empty_vec_operations() {
 }
 
 #[test]
+#[cfg(feature = "panic")]
+fn non_empty_vec_panicking_operations() {
+    let mut v: NonEmptyVec<i32> = NonEmptyVec::new(1);
+    v.push(2);
+    v.push(3);
+    assert_eq!(v.as_slice(), &[1, 2, 3]);
+
+    // pop succeeds when len > L
+    assert_eq!(v.pop(), 3);
+    assert_eq!(v.pop(), 2);
+    assert_eq!(v.len(), 1);
+
+    // remove succeeds when len > L
+    let mut v: BoundedVec<i32, 2, 6> = vec![10, 20, 30, 40].try_into().unwrap();
+    assert_eq!(v.remove(1), 20);
+    assert_eq!(v.as_slice(), &[10, 30, 40]);
+    assert_eq!(v.remove(0), 10);
+    assert_eq!(v.as_slice(), &[30, 40]);
+    assert_eq!(v.len(), 2);
+
+    // truncate succeeds when len >= L
+    let mut v: BoundedVec<i32, 2, 6> = vec![1, 2, 3, 4, 5].try_into().unwrap();
+    v.truncate(core::num::NonZero::new(3).unwrap());
+    assert_eq!(v.as_slice(), &[1, 2, 3]);
+    v.truncate(core::num::NonZero::new(2).unwrap());
+    assert_eq!(v.as_slice(), &[1, 2]);
+
+    // retain succeeds when retained count >= L
+    let mut v: BoundedVec<i32, 2, 6> = vec![1, 2, 3, 4].try_into().unwrap();
+    v.retain(|&x| x % 2 == 0);
+    assert_eq!(v.as_slice(), &[2, 4]);
+}
+
+#[test]
+#[cfg(feature = "panic")]
+#[should_panic(expected = "already at lower bound")]
+fn non_empty_pop_panics_at_lower_bound() {
+    let mut v: NonEmptyVec<i32> = NonEmptyVec::new(1);
+    v.pop();
+}
+
+#[test]
+#[cfg(feature = "panic")]
+#[should_panic(expected = "already at lower bound")]
+fn non_empty_remove_panics_at_lower_bound() {
+    let mut v: BoundedVec<i32, 2, 4> = vec![1, 2].try_into().unwrap();
+    v.remove(0);
+}
+
+#[test]
+#[cfg(feature = "panic")]
+#[should_panic(expected = "below lower bound")]
+fn non_empty_truncate_panics_below_lower_bound() {
+    let mut v: BoundedVec<i32, 2, 4> = vec![1, 2, 3].try_into().unwrap();
+    v.truncate(core::num::NonZero::new(1).unwrap());
+}
+
+#[test]
+fn non_empty_try_truncate_preserves_bounds() {
+    let mut v: BoundedVec<i32, 2, 4> = vec![1, 2, 3].try_into().unwrap();
+    assert!(v.try_truncate(core::num::NonZero::new(1).unwrap()).is_err());
+    assert_eq!(v.as_slice(), &[1, 2, 3]);
+    v.try_truncate(core::num::NonZero::new(2).unwrap()).unwrap();
+    assert_eq!(v.as_slice(), &[1, 2]);
+    v.try_truncate(core::num::NonZero::new(usize::MAX).unwrap())
+        .unwrap();
+    assert_eq!(v.as_slice(), &[1, 2]);
+}
+
+#[test]
+#[cfg(feature = "panic")]
+#[should_panic(expected = "Lower bound violation")]
+fn non_empty_retain_panics_when_dropping_below_lower_bound() {
+    let mut v: BoundedVec<i32, 2, 4> = vec![1, 2, 3].try_into().unwrap();
+    v.retain(|&x| x == 1);
+}
+
+#[test]
 fn from_head_tail() {
     let v: NonEmptyVec<i32> = NonEmptyVec::from_head_tail(1, vec![2, 3]).unwrap();
     assert_eq!(v.as_slice(), &[1, 2, 3]);
