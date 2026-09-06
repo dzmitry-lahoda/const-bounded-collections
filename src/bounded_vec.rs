@@ -10,6 +10,10 @@ use thiserror::Error;
 /// # Type Parameters
 ///
 /// * `W` - witness type to prove vector ranges and shape of interface accordingly
+///
+/// Serde and Borsh serialization, deserialization, and schema generation require
+/// `U <= u32::MAX`. These operations check the bound at compile time using
+/// kitness; constructing and using vectors with larger bounds is still supported.
 #[derive(PartialEq, Eq, Debug, Clone, Hash, PartialOrd, Ord)]
 pub struct BoundedVec<
     T,
@@ -1225,6 +1229,7 @@ mod borsh_impl {
             &self,
             writer: &mut Writer,
         ) -> borsh::io::Result<()> {
+            const { kitness::usize::assert_fits_u32::<U>() };
             let len = self.inner.len();
             if U <= usize::from(u8::MAX) {
                 #[expect(clippy::expect_used)]
@@ -1303,6 +1308,7 @@ mod borsh_impl {
 
     impl<T: BorshDeserialize, const U: usize> BorshDeserialize for EmptyBoundedVec<T, U> {
         fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> borsh::io::Result<Self> {
+            const { kitness::usize::assert_fits_u32::<U>() };
             let data = read_items::<T, U, R>(reader, 0)?;
             Ok(Self {
                 inner: data,
@@ -1313,6 +1319,7 @@ mod borsh_impl {
 
     impl<T: BorshDeserialize, const L: usize, const U: usize> BorshDeserialize for BoundedVec<T, L, U> {
         fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> borsh::io::Result<Self> {
+            const { kitness::usize::assert_fits_u32::<U>() };
             let data = read_items::<T, U, R>(reader, L)?;
             Ok(Self {
                 inner: data,
@@ -1331,6 +1338,7 @@ mod borsh_impl {
             fn add_definitions_recursively(
                 definitions: &mut BTreeMap<borsh::schema::Declaration, borsh::schema::Definition>,
             ) {
+                const { kitness::usize::assert_fits_u32::<U>() };
                 let len_width = if U <= usize::from(u8::MAX) {
                     1
                 } else if U <= usize::from(u16::MAX) {
@@ -1366,6 +1374,7 @@ mod borsh_impl {
             }
 
             fn declaration() -> borsh::schema::Declaration {
+                const { kitness::usize::assert_fits_u32::<U>() };
                 alloc::format!("BoundedVec<{}, {}, {}>", T::declaration(), L, U)
             }
         }
@@ -1409,6 +1418,7 @@ mod serde_impl {
         where
             S: serde::Serializer,
         {
+            const { kitness::usize::assert_fits_u32::<U>() };
             self.inner.serialize(serializer)
         }
     }
@@ -1418,6 +1428,7 @@ mod serde_impl {
         where
             D: serde::Deserializer<'de>,
         {
+            const { kitness::usize::assert_fits_u32::<U>() };
             let inner = Vec::<T>::deserialize(deserializer)?;
             Self::from_vec(inner).map_err(serde::de::Error::custom)
         }
@@ -1430,6 +1441,7 @@ mod serde_impl {
         where
             D: serde::Deserializer<'de>,
         {
+            const { kitness::usize::assert_fits_u32::<U>() };
             let inner = Vec::<T>::deserialize(deserializer)?;
             Self::from_vec(inner).map_err(serde::de::Error::custom)
         }
@@ -1445,10 +1457,12 @@ mod serde_impl {
             for BoundedVec<T, L, U, W>
         {
             fn schema_name() -> Cow<'static, str> {
+                const { kitness::usize::assert_fits_u32::<U>() };
                 alloc::format!("BoundedVec{}Min{}Max{}", T::schema_name(), L, U).into()
             }
 
             fn json_schema(r#gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+                const { kitness::usize::assert_fits_u32::<U>() };
                 schemars::json_schema!({
                     "type": "array",
                     "items": T::json_schema(r#gen),
