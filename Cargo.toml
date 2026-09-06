@@ -24,6 +24,8 @@ arbitrary = ["proptest"]
 borsh = ["dep:borsh", "kitness/borsh"]
 borsh_schema = ["borsh", "borsh/unstable__schema"]
 panic = []
+# Opt in to direct unstable sorting methods, whose equal-key order is unspecified.
+nondeterministic = []
 nightly = []
 
 [dev-dependencies]

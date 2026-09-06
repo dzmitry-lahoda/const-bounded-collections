@@ -21,6 +21,7 @@ assert_eq!(data, [2u8,4].into());
 ```
 
 ## Crate features
+
 - no features enabled by default
 - optional(non-default) [serde](https://serde.rs/) feature that adds serialization and deserialization to `BoundedVec`.
 - optional(non-default) `schemars` feature that adds JSON schema support via [schemars](https://graham.cool/schemars) (requires `serde`).
@@ -28,7 +29,42 @@ assert_eq!(data, [2u8,4].into());
 - optional(non-default) `borsh` feature that adds `borsh` binary encoding and decoding.
 - optional(non-default) `borsh_schema` feature that adds `borsh` schema support (requires `borsh`).
 - optional(non-default) `panic` feature that adds `push`, `insert`, and `Extend`, which panic on upper bound violations, plus mutable access to the underlying `Vec`, which can bypass the bounds. Fallible `try_push`, `try_insert`, and `try_extend` are available without this feature; invalid indices can still panic.
+- optional(non-default) `nondeterministic` feature that adds inherent `sort_unstable`, `sort_unstable_by`, and `sort_unstable_by_key` methods.
 - optional(non-default) `nightly` for experimental allocator support (not supported by the stable build).
+
+### `panic`
+
+Enables `push`, `insert`, `Extend<T>`, and `Extend<&T>` (for cloneable elements).
+These operations panic when growth would exceed `U`. `insert` also panics when
+`index > len`. `Extend` may append some elements before panicking; use
+`try_extend` to leave the vector unchanged on an upper-bound error.
+
+The feature also enables `AsMut<Vec<T>>`. Mutating that underlying vector bypasses
+bound checks, so callers must preserve `L <= len <= U` themselves.
+
+`try_push`, `try_insert`, and `try_extend` are available without this feature.
+Disabling `panic` does not make every operation panic-free: invalid indices and
+user-provided callbacks can still panic.
+
+### `nondeterministic`
+
+Enables the three inherent `sort_unstable*` methods with method-level `cfg` gates.
+They preserve length but may reorder elements that compare equal. The feature
+name refers to this unspecified tie order; it does not introduce randomness.
+
+Stable `sort`, `sort_by`, `sort_by_key`, and `sort_by_cached_key` are always
+available and preserve the relative order of equal elements or keys.
+
+This feature controls the inherent methods only. `DerefMut<Target = [T]>` and
+mutable slice access still expose Rust's slice sorting methods. In particular,
+`vector.sort_unstable()` can resolve to the slice method when the feature is off.
+
+Enable either feature independently, or both:
+
+```toml
+[dependencies]
+const-bounded-collections = { version = "0.10", features = ["panic", "nondeterministic"] }
+```
 
 
 # Inspired 

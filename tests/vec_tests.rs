@@ -129,11 +129,121 @@ fn deref_and_slice_methods() {
     let mut data: BoundedVec<i32, 2, 8> = vec![3, 1, 2].try_into().unwrap();
     assert_eq!(data[0], 3);
     assert_eq!(&data[1..], &[1, 2]);
-    data.sort_unstable();
+    data.sort();
     assert_eq!(data.as_slice(), &[1, 2, 3]);
     assert_eq!(data.binary_search(&2), Ok(1));
     data[0] = 10;
     assert_eq!(data[0], 10);
+}
+
+#[test]
+fn stable_sorts_preserve_equal_key_order_and_bounds() {
+    let original =
+        BoundedVec::<_, 4, 4>::from_vec(vec![(2, 'a'), (1, 'b'), (2, 'c'), (1, 'd')]).unwrap();
+    let expected = &[(1, 'b'), (1, 'd'), (2, 'a'), (2, 'c')];
+    let mut data = original.clone();
+    data.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(data.as_slice(), expected);
+    let mut data = original.clone();
+    data.sort_by_key(|item| item.0);
+    assert_eq!(data.as_slice(), expected);
+    let mut data = original;
+    let mut calls = 0;
+    data.sort_by_cached_key(|item| {
+        calls += 1;
+        item.0
+    });
+    assert!(calls <= data.len());
+    assert_eq!(data.as_slice(), expected);
+}
+
+#[test]
+#[cfg(feature = "nondeterministic")]
+fn unstable_sorts_preserve_elements_and_bounds() {
+    let mut data = BoundedVec::<_, 4, 4>::from_vec(vec![3, 1, 2, 1]).unwrap();
+    data.sort_unstable();
+    assert_eq!(data.as_slice(), &[1, 1, 2, 3]);
+    data.sort_unstable_by(|a, b| b.cmp(a));
+    assert_eq!(data.as_slice(), &[3, 2, 1, 1]);
+    data.sort_unstable_by_key(|x| *x);
+    assert_eq!(data.as_slice(), &[1, 1, 2, 3]);
+}
+
+#[test]
+fn checked_dedup_preserves_lower_bound_on_failure() {
+    let original = vec![11, 12, 21, 22];
+    let mut data = BoundedVec::<_, 3, 8>::from_vec(original.clone()).unwrap();
+    let error = data
+        .try_dedup_by_key(|x| {
+            *x += 100;
+            (*x % 100) / 10
+        })
+        .unwrap_err();
+    assert_eq!(
+        error,
+        BoundedVecOutOfBounds::LowerBoundError {
+            lower_bound: 3,
+            got_smaller_by: 1,
+        }
+    );
+    assert_eq!(data.as_slice(), original);
+    assert!(data.try_dedup_by(|a, b| *a / 10 == *b / 10).is_err());
+    assert_eq!(data.as_slice(), original);
+
+    let mut data = BoundedVec::<_, 2, 8>::from_vec(original).unwrap();
+    data.try_dedup_by_key(|x| *x / 10).unwrap();
+    assert_eq!(data.as_slice(), &[11, 21]);
+    data.try_dedup().unwrap();
+    assert_eq!(data.as_slice(), &[11, 21]);
+}
+
+#[test]
+fn checked_dedup_callback_panic_preserves_vector() {
+    let original = vec![1, 1, 2];
+    let mut data = BoundedVec::<_, 2, 8>::from_vec(original.clone()).unwrap();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = data.try_dedup_by(|a, _| {
+            *a = 99;
+            panic!("predicate failed")
+        });
+    }));
+    assert!(result.is_err());
+    assert_eq!(data.as_slice(), original);
+}
+
+#[test]
+fn retain_preserves_bounds_and_supports_non_clone_elements() {
+    struct Item(i32);
+    let mut empty = EmptyBoundedVec::<_, 4>::from_vec(vec![Item(1), Item(2)]).unwrap();
+    empty.retain(|_| false);
+    assert!(empty.is_empty());
+
+    let mut data = BoundedVec::<_, 2, 4>::from_vec(vec![Item(1), Item(2), Item(3)]).unwrap();
+    let mut visited = Vec::new();
+    data.try_retain(|item| {
+        visited.push(item.0);
+        item.0 != 2
+    })
+    .unwrap();
+    assert_eq!(visited, [1, 2, 3]);
+    assert_eq!(data.iter().map(|x| x.0).collect::<Vec<_>>(), [1, 3]);
+    assert_eq!(
+        data.try_retain(|_| false),
+        Err(BoundedVecOutOfBounds::LowerBoundError {
+            lower_bound: 2,
+            got_smaller_by: 2,
+        })
+    );
+    assert_eq!(data.iter().map(|x| x.0).collect::<Vec<_>>(), [1, 3]);
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = data.try_retain(|item| {
+            assert_ne!(item.0, 3, "predicate failed");
+            false
+        });
+    }));
+    assert!(result.is_err());
+    assert_eq!(data.iter().map(|x| x.0).collect::<Vec<_>>(), [1, 3]);
 }
 
 #[test]

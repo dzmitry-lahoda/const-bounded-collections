@@ -81,7 +81,7 @@ fn normalized_range<R: core::ops::RangeBounds<usize>>(
     start..end
 }
 
-fn larger_by_after_adding(len: usize, additional: usize, upper_bound: usize) -> usize {
+const fn larger_by_after_adding(len: usize, additional: usize, upper_bound: usize) -> usize {
     match len.checked_add(additional) {
         Some(new_len) => new_len.saturating_sub(upper_bound),
         None if len <= upper_bound => additional.saturating_sub(upper_bound - len),
@@ -89,7 +89,7 @@ fn larger_by_after_adding(len: usize, additional: usize, upper_bound: usize) -> 
     }
 }
 
-fn smaller_by_after_removing(len: usize, removed: usize, lower_bound: usize) -> usize {
+const fn smaller_by_after_removing(len: usize, removed: usize, lower_bound: usize) -> usize {
     match len.checked_sub(removed) {
         Some(new_len) => lower_bound.saturating_sub(new_len),
         None => lower_bound,
@@ -98,10 +98,7 @@ fn smaller_by_after_removing(len: usize, removed: usize, lower_bound: usize) -> 
 
 impl<T, const U: usize> Default for BoundedVec<T, 0, U, witnesses::Empty<U>> {
     fn default() -> Self {
-        BoundedVec {
-            inner: Vec::new(),
-            witness: witnesses::empty(),
-        }
+        Self::new()
     }
 }
 
@@ -124,13 +121,26 @@ impl<T, const U: usize> BoundedVec<T, 0, U, witnesses::Empty<U>> {
     ///     BoundedVec::<_, 0, 8, witnesses::Empty<8>>::from_vec(vec![1u8, 2]).unwrap();
     /// ```
     pub fn from_vec(items: Vec<T>) -> Result<Self, BoundedVecOutOfBounds> {
+        Self::from_vec_preserving_input(items).map_err(|(_, error)| error)
+    }
+
+    /// Checks the upper bound without dropping rejected input.
+    ///
+    /// Returns the original vector and the bounds error on failure. Neither
+    /// success nor failure clones elements or changes the allocation.
+    pub const fn from_vec_preserving_input(
+        items: Vec<T>,
+    ) -> Result<Self, (Vec<T>, BoundedVecOutOfBounds)> {
         let witness = witnesses::empty::<U>();
         let len = items.len();
         if len > U {
-            Err(BoundedVecOutOfBounds::UpperBoundError {
-                upper_bound: U,
-                got_larger_by: len - U,
-            })
+            Err((
+                items,
+                BoundedVecOutOfBounds::UpperBoundError {
+                    upper_bound: U,
+                    got_larger_by: len - U,
+                },
+            ))
         } else {
             Ok(BoundedVec {
                 inner: items,
@@ -150,8 +160,8 @@ impl<T, const U: usize> BoundedVec<T, 0, U, witnesses::Empty<U>> {
     /// let data: BoundedVec<u8, 0, 8, witnesses::Empty<8>> = vec![1u8, 2].try_into().unwrap();
     /// assert_eq!(data.first(), Some(&1u8));
     /// ```
-    pub fn first(&self) -> Option<&T> {
-        self.inner.first()
+    pub const fn first(&self) -> Option<&T> {
+        self.inner.as_slice().first()
     }
 
     /// Constructs a new, empty `BoundedVec`.
@@ -159,14 +169,22 @@ impl<T, const U: usize> BoundedVec<T, 0, U, witnesses::Empty<U>> {
     /// # Example
     /// ```
     /// use const_bounded_collections::EmptyBoundedVec;
-    /// let v: EmptyBoundedVec<i32, 10> = EmptyBoundedVec::new();
-    /// assert!(v.is_empty());
+    /// const EMPTY: EmptyBoundedVec<i32, 10> = EmptyBoundedVec::new();
+    /// static VALUE: EmptyBoundedVec<i32, 10> = EMPTY;
+    /// const _: () = assert!(VALUE.is_empty());
     /// ```
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             inner: Vec::new(),
             witness: witnesses::empty(),
         }
+    }
+
+    /// Transfers all elements and capacity into a `Vec`, leaving this vector empty.
+    ///
+    /// Does not clone or drop elements. Only available for empty-capable vectors.
+    pub const fn take_vec(&mut self) -> Vec<T> {
+        core::mem::replace(&mut self.inner, Vec::new())
     }
 
     /// Constructs a new, empty `BoundedVec` with the specified capacity.
@@ -188,18 +206,18 @@ impl<T, const U: usize> BoundedVec<T, 0, U, witnesses::Empty<U>> {
     /// let data: BoundedVec<u8, 0, 8, witnesses::Empty<8>> = vec![1u8, 2].try_into().unwrap();
     /// assert_eq!(data.last(), Some(&2u8));
     /// ```
-    pub fn last(&self) -> Option<&T> {
-        self.inner.last()
+    pub const fn last(&self) -> Option<&T> {
+        self.inner.as_slice().last()
     }
 
     /// Returns a mutable reference to the first element of the vector, or `None` if it is empty
-    pub fn first_mut(&mut self) -> Option<&mut T> {
-        self.inner.first_mut()
+    pub const fn first_mut(&mut self) -> Option<&mut T> {
+        self.inner.as_mut_slice().first_mut()
     }
 
     /// Returns a mutable reference to the last element of the vector, or `None` if it is empty
-    pub fn last_mut(&mut self) -> Option<&mut T> {
-        self.inner.last_mut()
+    pub const fn last_mut(&mut self) -> Option<&mut T> {
+        self.inner.as_mut_slice().last_mut()
     }
 
     /// Removes the last element from the vector and returns it, or `None` if it is empty.
@@ -327,7 +345,7 @@ impl<T, const L: usize, const U: usize, W> BoundedVec<T, L, U, W> {
     /// let data: BoundedVec<u8, 2, 4> = vec![1u8, 2].try_into().unwrap();
     /// assert_eq!(data.len(), 2);
     /// ```
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.inner.len()
     }
 
@@ -341,7 +359,7 @@ impl<T, const L: usize, const U: usize, W> BoundedVec<T, L, U, W> {
     /// assert!(!data.is_empty());
     /// assert!(EmptyBoundedVec::<u8, 8>::new().is_empty());
     /// ```
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
 
@@ -373,11 +391,11 @@ impl<T, const L: usize, const U: usize, W> BoundedVec<T, L, U, W> {
     /// let data: BoundedVec<_, 2, 8> = vec![1u8, 2].try_into().unwrap();
     /// assert_eq!(data.as_vec(), &vec![1u8,2]);
     /// ```
-    pub fn as_vec(&self) -> &Vec<T> {
+    pub const fn as_vec(&self) -> &Vec<T> {
         &self.inner
     }
 
-    /// Returns an underlying `Vec``
+    /// Consumes the bounded vector and returns its underlying `Vec` without cloning.
     ///
     /// # Example
     /// ```
@@ -387,8 +405,26 @@ impl<T, const L: usize, const U: usize, W> BoundedVec<T, L, U, W> {
     /// let data: BoundedVec<_, 2, 8> = vec![1u8, 2].try_into().unwrap();
     /// assert_eq!(data.to_vec(), vec![1u8,2]);
     /// ```
-    pub fn to_vec(self) -> Vec<T> {
-        self.inner
+    pub const fn to_vec(self) -> Vec<T>
+    where
+        W: Copy,
+    {
+        self.into_vec()
+    }
+
+    /// Consumes the bounded vector, transferring its elements and allocation.
+    ///
+    /// Like [`Self::to_vec`], this does not clone or drop elements. All built-in
+    /// witnesses are `Copy`, allowing the emptied wrapper to be forgotten in const.
+    pub const fn into_vec(mut self) -> Vec<T>
+    where
+        W: Copy,
+    {
+        let inner = core::mem::replace(&mut self.inner, Vec::new());
+        // The replacement Vec owns no allocation, and Copy witnesses have no
+        // destructor. Forgetting this emptied wrapper cannot leak resources.
+        core::mem::forget(self);
+        inner
     }
 
     /// Extracts a slice containing the entire vector.
@@ -401,7 +437,7 @@ impl<T, const L: usize, const U: usize, W> BoundedVec<T, L, U, W> {
     /// let data: BoundedVec<_, 2, 8> = vec![1u8, 2].try_into().unwrap();
     /// assert_eq!(data.as_slice(), &[1u8,2]);
     /// ```
-    pub fn as_slice(&self) -> &[T] {
+    pub const fn as_slice(&self) -> &[T] {
         self.inner.as_slice()
     }
 
@@ -415,8 +451,12 @@ impl<T, const L: usize, const U: usize, W> BoundedVec<T, L, U, W> {
     /// let elem = *data.get(1).unwrap();
     /// assert_eq!(elem, 2);
     /// ```
-    pub fn get(&self, index: usize) -> Option<&T> {
-        self.inner.get(index)
+    pub const fn get(&self, index: usize) -> Option<&T> {
+        if index < self.len() {
+            Some(&self.as_slice()[index])
+        } else {
+            None
+        }
     }
 
     /// Returns a mutable reference for an element at index or `None` if out of bounds
@@ -429,8 +469,12 @@ impl<T, const L: usize, const U: usize, W> BoundedVec<T, L, U, W> {
     /// let elem = *data.get_mut(1).unwrap();
     /// assert_eq!(elem, 2);
     /// ```
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
-        self.inner.get_mut(index)
+    pub const fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        if index < self.len() {
+            Some(&mut self.as_mut_slice()[index])
+        } else {
+            None
+        }
     }
 
     /// Returns an iterator
@@ -540,12 +584,161 @@ impl<T, const L: usize, const U: usize, W> BoundedVec<T, L, U, W> {
     }
 
     /// Extracts a mutable slice containing the entire vector.
-    pub fn as_mut_slice(&mut self) -> &mut [T] {
+    pub const fn as_mut_slice(&mut self) -> &mut [T] {
         self.inner.as_mut_slice()
     }
 
+    /// Swaps two elements without changing the vector's length.
+    ///
+    /// # Panics
+    /// Panics if either index is out of bounds.
+    #[track_caller]
+    #[cfg(feature = "panic")]
+    pub const fn swap(&mut self, a: usize, b: usize) {
+        self.as_mut_slice().swap(a, b);
+    }
+
+    /// Reverses the elements in place without changing the vector's length.
+    pub const fn reverse(&mut self) {
+        self.as_mut_slice().reverse();
+    }
+
+    /// Rotates the elements left by `mid` positions without changing the length.
+    ///
+    /// # Panics
+    /// Panics if `mid > self.len()`.
+    #[track_caller]
+    #[cfg(feature = "panic")]
+    pub const fn rotate_left(&mut self, mid: usize) {
+        self.as_mut_slice().rotate_left(mid);
+    }
+
+    /// Rotates the elements right by `k` positions without changing the length.
+    ///
+    /// # Panics
+    /// Panics if `k > self.len()`.
+    #[track_caller]
+    #[cfg(feature = "panic")]
+    pub const fn rotate_right(&mut self, k: usize) {
+        self.as_mut_slice().rotate_right(k);
+    }
+
+    /// Borrows two slices divided at `mid`; their lengths are not bounded by `L`.
+    ///
+    /// # Panics
+    /// Panics if `mid > self.len()`.
+    #[track_caller]
+    #[cfg(feature = "panic")]
+    pub const fn split_at(&self, mid: usize) -> (&[T], &[T]) {
+        self.as_slice().split_at(mid)
+    }
+
+    /// Mutably borrows two disjoint slices divided at `mid`.
+    ///
+    /// The slices may be shorter than `L`; the vector's length stays unchanged.
+    ///
+    /// # Panics
+    /// Panics if `mid > self.len()`.
+    #[track_caller]
+    #[cfg(feature = "panic")]
+    pub const fn split_at_mut(&mut self, mid: usize) -> (&mut [T], &mut [T]) {
+        self.as_mut_slice().split_at_mut(mid)
+    }
+
+    /// Borrows two slices divided at `mid`, or returns `None` if it exceeds the length.
+    pub const fn split_at_checked(&self, mid: usize) -> Option<(&[T], &[T])> {
+        self.as_slice().split_at_checked(mid)
+    }
+
+    /// Mutably borrows two disjoint slices, or returns `None` if `mid` exceeds the length.
+    pub const fn split_at_mut_checked(&mut self, mid: usize) -> Option<(&mut [T], &mut [T])> {
+        self.as_mut_slice().split_at_mut_checked(mid)
+    }
+
+    /// Copies elements from `src` without changing the vector's length.
+    ///
+    /// # Panics
+    /// Panics if `src` and the vector have different lengths.
+    #[track_caller]
+    pub const fn copy_from_slice(&mut self, src: &[T])
+    where
+        T: Copy,
+    {
+        self.as_mut_slice().copy_from_slice(src);
+    }
+
+    /// Sorts the vector, preserving the order of equal elements and its length.
+    pub fn sort(&mut self)
+    where
+        T: Ord,
+    {
+        self.inner.sort();
+    }
+
+    /// Sorts with a comparator, preserving the order of equal elements.
+    pub fn sort_by<F>(&mut self, compare: F)
+    where
+        F: FnMut(&T, &T) -> core::cmp::Ordering,
+    {
+        self.inner.sort_by(compare);
+    }
+
+    /// Sorts by a key, preserving the order of elements with equal keys.
+    pub fn sort_by_key<K, F>(&mut self, key: F)
+    where
+        K: Ord,
+        F: FnMut(&T) -> K,
+    {
+        self.inner.sort_by_key(key);
+    }
+
+    /// Sorts stably, computing each element's key at most once.
+    pub fn sort_by_cached_key<K, F>(&mut self, key: F)
+    where
+        K: Ord,
+        F: FnMut(&T) -> K,
+    {
+        self.inner.sort_by_cached_key(key);
+    }
+
+    /// Sorts without preserving the order of equal elements.
+    ///
+    /// This inherent method is available with the `nondeterministic` feature.
+    /// Equal-element order is unspecified, not random. Slice methods remain
+    /// available through mutable slice access and dereferencing.
+    #[cfg(feature = "nondeterministic")]
+    pub fn sort_unstable(&mut self)
+    where
+        T: Ord,
+    {
+        self.inner.sort_unstable();
+    }
+
+    /// Sorts with a comparator without preserving the order of equal elements.
+    ///
+    /// Requires the `nondeterministic` feature; see [`Self::sort_unstable`].
+    #[cfg(feature = "nondeterministic")]
+    pub fn sort_unstable_by<F>(&mut self, compare: F)
+    where
+        F: FnMut(&T, &T) -> core::cmp::Ordering,
+    {
+        self.inner.sort_unstable_by(compare);
+    }
+
+    /// Sorts by a key without preserving the order of elements with equal keys.
+    ///
+    /// Requires the `nondeterministic` feature; see [`Self::sort_unstable`].
+    #[cfg(feature = "nondeterministic")]
+    pub fn sort_unstable_by_key<K, F>(&mut self, key: F)
+    where
+        K: Ord,
+        F: FnMut(&T) -> K,
+    {
+        self.inner.sort_unstable_by_key(key);
+    }
+
     /// Returns the total number of elements the vector can hold without reallocating.
-    pub fn capacity(&self) -> usize {
+    pub const fn capacity(&self) -> usize {
         self.inner.capacity()
     }
 
@@ -708,18 +901,34 @@ impl<T, const L: usize, const U: usize> BoundedVec<T, L, U, witnesses::NonEmpty<
     ///     BoundedVec::<_, 2, 8, witnesses::NonEmpty<2, 8>>::from_vec(vec![1u8, 2]).unwrap();
     /// ```
     pub fn from_vec(items: Vec<T>) -> Result<Self, BoundedVecOutOfBounds> {
+        Self::from_vec_preserving_input(items).map_err(|(_, error)| error)
+    }
+
+    /// Checks both bounds without dropping rejected input.
+    ///
+    /// Returns the original vector and the bounds error on failure. Neither
+    /// success nor failure clones elements or changes the allocation.
+    pub const fn from_vec_preserving_input(
+        items: Vec<T>,
+    ) -> Result<Self, (Vec<T>, BoundedVecOutOfBounds)> {
         let witness = witnesses::non_empty::<L, U>();
         let len = items.len();
         if len < L {
-            Err(BoundedVecOutOfBounds::LowerBoundError {
-                lower_bound: L,
-                got_smaller_by: L - len,
-            })
+            Err((
+                items,
+                BoundedVecOutOfBounds::LowerBoundError {
+                    lower_bound: L,
+                    got_smaller_by: L - len,
+                },
+            ))
         } else if len > U {
-            Err(BoundedVecOutOfBounds::UpperBoundError {
-                upper_bound: U,
-                got_larger_by: len - U,
-            })
+            Err((
+                items,
+                BoundedVecOutOfBounds::UpperBoundError {
+                    upper_bound: U,
+                    got_larger_by: len - U,
+                },
+            ))
         } else {
             Ok(BoundedVec {
                 inner: items,
@@ -738,9 +947,9 @@ impl<T, const L: usize, const U: usize> BoundedVec<T, L, U, witnesses::NonEmpty<
     /// let data: BoundedVec<_, 2, 8> = vec![1u8, 2].try_into().unwrap();
     /// assert_eq!(*data.first(), 1);
     /// ```
-    pub fn first(&self) -> &T {
+    pub const fn first(&self) -> &T {
         #[allow(clippy::unwrap_used)]
-        self.inner.first().unwrap()
+        self.inner.as_slice().first().unwrap()
     }
 
     /// Returns the last element of non-empty Vec
@@ -753,15 +962,15 @@ impl<T, const L: usize, const U: usize> BoundedVec<T, L, U, witnesses::NonEmpty<
     /// let data: BoundedVec<_, 2, 8> = vec![1u8, 2].try_into().unwrap();
     /// assert_eq!(*data.last(), 2);
     /// ```
-    pub fn last(&self) -> &T {
+    pub const fn last(&self) -> &T {
         #[allow(clippy::unwrap_used)]
-        self.inner.last().unwrap()
+        self.inner.as_slice().last().unwrap()
     }
 
     /// Returns the last and all the rest of the elements
-    pub fn split_last(&self) -> (&T, &[T]) {
+    pub const fn split_last(&self) -> (&T, &[T]) {
         #[allow(clippy::unwrap_used)]
-        self.inner.split_last().unwrap()
+        self.inner.as_slice().split_last().unwrap()
     }
 
     /// Return a Some(BoundedVec) or None if `v` is empty
@@ -788,33 +997,33 @@ impl<T, const L: usize, const U: usize> BoundedVec<T, L, U, witnesses::NonEmpty<
     }
 
     /// Returns a mutable reference to the first element of non-empty Vec
-    pub fn first_mut(&mut self) -> &mut T {
+    pub const fn first_mut(&mut self) -> &mut T {
         #[allow(clippy::unwrap_used)]
-        self.inner.first_mut().unwrap()
+        self.inner.as_mut_slice().first_mut().unwrap()
     }
 
     /// Returns a mutable reference to the last element of non-empty Vec
-    pub fn last_mut(&mut self) -> &mut T {
+    pub const fn last_mut(&mut self) -> &mut T {
         #[allow(clippy::unwrap_used)]
-        self.inner.last_mut().unwrap()
+        self.inner.as_mut_slice().last_mut().unwrap()
     }
 
     /// Returns the first and all the rest of the elements.
-    pub fn split_first(&self) -> (&T, &[T]) {
+    pub const fn split_first(&self) -> (&T, &[T]) {
         #[allow(clippy::unwrap_used)]
-        self.inner.split_first().unwrap()
+        self.inner.as_slice().split_first().unwrap()
     }
 
     /// Returns a mutable reference to the first element and a mutable slice of all the rest.
-    pub fn split_first_mut(&mut self) -> (&mut T, &mut [T]) {
+    pub const fn split_first_mut(&mut self) -> (&mut T, &mut [T]) {
         #[allow(clippy::unwrap_used)]
-        self.inner.split_first_mut().unwrap()
+        self.inner.as_mut_slice().split_first_mut().unwrap()
     }
 
     /// Returns a mutable reference to the last element and a mutable slice of all the rest.
-    pub fn split_last_mut(&mut self) -> (&mut T, &mut [T]) {
+    pub const fn split_last_mut(&mut self) -> (&mut T, &mut [T]) {
         #[allow(clippy::unwrap_used)]
-        self.inner.split_last_mut().unwrap()
+        self.inner.as_mut_slice().split_last_mut().unwrap()
     }
 
     /// Removes elements in `range`, but never more than `len - L`, and returns
@@ -911,14 +1120,53 @@ impl<T, const L: usize, const U: usize> BoundedVec<T, L, U, witnesses::NonEmpty<
         Ok(())
     }
 
+    /// Retains elements matching the predicate, or returns `LowerBoundError`
+    /// if the resulting length would be below `L`.
+    ///
+    /// Evaluates the predicate once per element in order, recording decisions
+    /// before removing anything. A lower-bound error or predicate panic leaves
+    /// all elements in place. This allocates temporary storage but needs no clone.
+    pub fn try_retain<F>(&mut self, f: F) -> Result<(), BoundedVecOutOfBounds>
+    where
+        F: FnMut(&T) -> bool,
+    {
+        let decisions: Vec<bool> = self.inner.iter().map(f).collect();
+        let retained_len = decisions.iter().filter(|keep| **keep).count();
+        if retained_len < L {
+            return Err(BoundedVecOutOfBounds::LowerBoundError {
+                lower_bound: L,
+                got_smaller_by: L - retained_len,
+            });
+        }
+        let mut decisions = decisions.into_iter();
+        self.inner.retain(|_| {
+            #[expect(clippy::expect_used)]
+            decisions.next().expect("one decision per element")
+        });
+        Ok(())
+    }
+
     /// Removes consecutive duplicate elements in the vector, or returns
     /// `LowerBoundError` if deduplication causes the length to drop below `L`.
     pub fn try_dedup(&mut self) -> Result<(), BoundedVecOutOfBounds>
     where
         T: PartialEq + Clone,
     {
+        self.try_dedup_by(|a, b| a == b)
+    }
+
+    /// Removes consecutive elements that satisfy the predicate, or returns
+    /// `LowerBoundError` if the resulting length would be below `L`.
+    ///
+    /// Operates on a clone and replaces the vector only on success. The predicate
+    /// receives elements in reverse order, like [`Vec::dedup_by`].
+    pub fn try_dedup_by<F>(&mut self, same_bucket: F) -> Result<(), BoundedVecOutOfBounds>
+    where
+        T: Clone,
+        F: FnMut(&mut T, &mut T) -> bool,
+    {
         let mut v = self.inner.clone();
-        v.dedup();
+        v.dedup_by(same_bucket);
         if v.len() < L {
             return Err(BoundedVecOutOfBounds::LowerBoundError {
                 lower_bound: L,
@@ -927,6 +1175,19 @@ impl<T, const L: usize, const U: usize> BoundedVec<T, L, U, witnesses::NonEmpty<
         }
         self.inner = v;
         Ok(())
+    }
+
+    /// Removes consecutive elements with equal keys, or returns
+    /// `LowerBoundError` if the resulting length would be below `L`.
+    ///
+    /// Operates on a clone and replaces the vector only on success.
+    pub fn try_dedup_by_key<F, K>(&mut self, mut key: F) -> Result<(), BoundedVecOutOfBounds>
+    where
+        T: Clone,
+        F: FnMut(&mut T) -> K,
+        K: PartialEq,
+    {
+        self.try_dedup_by(|a, b| key(a) == key(b))
     }
 }
 
