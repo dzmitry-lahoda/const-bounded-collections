@@ -49,9 +49,6 @@
               pkgs.cargo-hack
             ];
             text = ''
-              cargo hack check --feature-powerset --no-dev-deps --exclude-features=nightly
-              cargo hack test --each-feature --exclude-features=nightly
-              cargo hack clippy --each-feature --exclude-features=nightly
               cargo hack check --feature-powerset --no-dev-deps
               cargo hack test --each-feature
               cargo hack clippy --each-feature

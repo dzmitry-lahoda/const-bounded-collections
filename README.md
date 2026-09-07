@@ -5,6 +5,12 @@
 `NonEmptyVec<T>` if a lower bound of one and the largest supported upper bound are needed (`usize::MAX`, or `u32::MAX` with `schemars` or `borsh`).
 This crate is `#![no_std]` compatible with `alloc`.
 
+## Nightly
+
+This crate works on stable Rust.
+My analysis shows that nighly wil require full `alloc::vec::Vec` rewrite from scratch,
+so not attemp to support nightly here.
+
 ## Example
 
 ```rust
@@ -30,7 +36,6 @@ assert_eq!(data, [2u8,4].into());
 - optional(non-default) `borsh_schema` feature that adds `borsh` schema support (requires `borsh`).
 - optional(non-default) `panic` feature that adds `push`, `insert`, and `Extend`, which panic on upper bound violations, plus mutable access to the underlying `Vec`, which can bypass the bounds. Fallible `try_push`, `try_insert`, and `try_extend` are available without this feature; invalid indices can still panic.
 - optional(non-default) `nondeterministic` feature that adds inherent `sort_unstable`, `sort_unstable_by`, and `sort_unstable_by_key` methods.
-- optional(non-default) `nightly` for experimental allocator support (not supported by the stable build).
 
 ### `panic`
 
@@ -65,7 +70,6 @@ Enable either feature independently, or both:
 [dependencies]
 const-bounded-collections = { version = "0.10", features = ["panic", "nondeterministic"] }
 ```
-
 
 # Inspired 
 

@@ -16,16 +16,7 @@ use thiserror::Error;
 /// `U <= u32::MAX`. These operations check the bound at compile time using
 /// kitness; constructing and using vectors with larger bounds is still supported.
 #[derive(PartialEq, Eq, Debug, Clone, Hash, PartialOrd, Ord)]
-pub struct BoundedVec<
-    T,
-    const L: usize,
-    const U: usize,
-    W = witnesses::NonEmpty<L, U>,
-    #[cfg(feature = "nightly")] A: alloc::alloc::Allocator = alloc::alloc::Global,
-> {
-    #[cfg(feature = "nightly")]
-    inner: Vec<T, A>,
-    #[cfg(not(feature = "nightly"))]
+pub struct BoundedVec<T, const L: usize, const U: usize, W = witnesses::NonEmpty<L, U>> {
     inner: Vec<T>,
     witness: W,
 }

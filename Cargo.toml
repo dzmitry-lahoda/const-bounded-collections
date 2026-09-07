@@ -15,7 +15,7 @@ schemars = { version = "1.2.0", default-features = false, optional = true }
 thiserror = { version = "2", default-features = false }
 proptest = { version = "1.11", optional = true }
 borsh = { version = "1.6", default-features = false, optional = true }
-kitness = { git = "https://github.com/dzmitry-lahoda/kitness", rev = "8bec62fca015c27a1263b48332ca57d5e0995c7f", default-features = false }
+kitness = { git = "https://github.com/dzmitry-lahoda/kitness", rev = "46d0ade2fb43db1f8ce0e58317d9c29e151a6cdd", default-features = false }
 
 [features]
 serde = ["dep:serde", "kitness/json"]
@@ -26,7 +26,6 @@ borsh_schema = ["borsh", "borsh/unstable__schema"]
 panic = []
 # Opt in to direct unstable sorting methods, whose equal-key order is unspecified.
 nondeterministic = []
-nightly = []
 
 [dev-dependencies]
 proptest = { version = "1.11" }
